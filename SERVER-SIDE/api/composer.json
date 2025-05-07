@@ -1,0 +1,6 @@
+{
+    "require": {
+        "mongodb/mongodb": "^1.15",
+        "firebase/php-jwt": "^6.11"
+    }
+}
