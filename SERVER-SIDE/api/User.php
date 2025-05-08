@@ -16,15 +16,6 @@ use MongoDB\BSON\UTCDateTime;
 use MongoDB\Model\BSONDocument;
 use MongoDB\Model\BSONArray;
 
-
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-header("Content-Type: application/json");
-
-require_once __DIR__ . '/db.php';
-require __DIR__ . '/vendor/autoload.php';
-
 class User {
     private $usersCollection;
     private $blacklistCollection;
@@ -78,7 +69,7 @@ class User {
         $payload = array_merge([
             'iat' => $issuedAt,
             'exp' => $expirationTime,
-            'sub' => (string)$userId,
+            'sub' => $userId,
             'iss' => $_SERVER['HTTP_HOST'] ?? 'fitness-app'
         ], $additionalClaims);
 
@@ -88,7 +79,9 @@ class User {
     public function validateToken(string $token): ?array {
         try {
             $decoded = JWT::decode($token, new Key($this->secretKey, 'HS256'));
-            return (array)$decoded;
+
+            // ✅ Convert stdClass to associative array to prevent type issues
+            return json_decode(json_encode($decoded), true);
         } catch (Exception $e) {
             error_log('JWT Validation Error: ' . $e->getMessage());
             return null;
@@ -216,7 +209,6 @@ class User {
 
     public function getProfile(string $userId): array {
         $user = $this->findById($userId);
-        
         return [
             '_id' => $user['_id'],
             'firstName' => $user['firstName'],
@@ -255,9 +247,4 @@ class User {
 
         return $data;
     }
-     
-    
-
 }
-
-
