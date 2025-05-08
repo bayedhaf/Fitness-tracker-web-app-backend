@@ -45,7 +45,7 @@ try {
         throw new Exception("Invalid credentials");
     }
 
-    // Safely extract user ID
+    
     if (isset($existingUser['_id']) && is_object($existingUser['_id']) && method_exists($existingUser['_id'], '__toString')) {
         $userId = (string) $existingUser['_id'];
     } elseif (isset($existingUser['_id']['$oid'])) {
@@ -54,7 +54,7 @@ try {
         $userId = $existingUser['_id'] ?? '';
     }
 
-    // Generate JWT token
+    
     $token = $user->generateToken($userId);
 
     $userData = [
