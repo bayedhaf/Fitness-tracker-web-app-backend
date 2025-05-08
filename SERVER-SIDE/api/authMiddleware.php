@@ -1,91 +1,120 @@
 <?php
+declare(strict_types=1);
+
+header("Access-Control-Allow-Origin: http://localhost:5173");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Authorization, Content-Type");
+header("Access-Control-Allow-Credentials: true");
+header("Content-Type: application/json");
+
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+error_reporting(E_ALL);
+
+
+require_once __DIR__ . '/authMiddleware.php';
 require_once __DIR__ . '/User.php';
-require __DIR__ . '/vendor/autoload.php';
 
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
 
-function authenticateRequest() {
-    try {
-        $authHeader = getAuthorizationHeader();
-        if (!$authHeader) {
-            throw new Exception('Authorization header missing', 401);
-        }
-
-        $token = extractBearerToken($authHeader);
-        if (empty($token)) {
-            throw new Exception('Token not provided', 401);
-        }
-
-        $user = new User();
-
-        if ($user->isTokenBlacklisted($token)) {
-            throw new Exception('Token revoked', 401);
-        }
-
-        $decoded = $user->validateToken($token);
-        if (!$decoded) {
-            throw new Exception('Invalid or expired token', 401);
-        }
-
-        if (!$user->findById($decoded['sub'])) {
-            throw new Exception('User no longer exists', 401);
-        }
-
-        return $decoded['sub'];
-    } catch (\DomainException $e) {
-        throw new Exception('Malformed token: ' . $e->getMessage(), 401);
-    } catch (\UnexpectedValueException $e) {
-        throw new Exception('Invalid token: ' . $e->getMessage(), 401);
-    } catch (Exception $e) {
-        $code = $e->getCode() ?: 401;
-        throw new Exception($e->getMessage(), $code);
-    }
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
 }
 
-function authorizeRoles($allowedRoles = []) {
+$response = [
+    'success' => false,
+    'data' => null,
+    'message' => '',
+    'meta' => [
+        'apiVersion' => '1.2.0',
+        'requestId' => uniqid()
+    ]
+];
+
+try {
+   
     $userId = authenticateRequest();
-    $user = new User();
-    $userData = $user->findById($userId);
 
-    if (empty($allowedRoles)) {
-        return $userId;
-    }
-
-    if (!$userData || !isset($userData['role']) || !in_array($userData['role'], $allowedRoles)) {
-        throw new Exception('Insufficient permissions', 403);
-    }
-
-    return $userId;
-}
-
-function getAuthorizationHeader() {
-    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        return $_SERVER['HTTP_AUTHORIZATION'];
-    }
-    if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-        return $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    }
-
-    if (function_exists('apache_request_headers')) {
-        $headers = apache_request_headers();
-        if (isset($headers['Authorization'])) {
-            return $headers['Authorization'];
+    
+    $rawInput = file_get_contents('php://input');
+    $input = [];
+    if (!empty($rawInput)) {
+        $input = json_decode($rawInput, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Invalid JSON input', 400);
         }
     }
 
-    return null;
-}
-
-function extractBearerToken($authHeader) {
-    if (!preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
-        return null;
+ 
+    if (!isset($input['userId']) || $input['userId'] !== $userId) {
+        $input['userId'] = $userId;
     }
-    return trim($matches[1]);
-}
 
-function getAuthenticatedUser() {
-    $userId = authenticateRequest();
-    $user = new User();
-    return $user->findById($userId);
+  
+    $userService = new User();
+    $dashboardData = $userService->getDashboardData($userId);
+
+    
+    if (empty($dashboardData['workoutHistory'])) {
+        $dashboardData['workoutHistory'] = [
+            [
+                'name' => 'Morning Run',
+                'duration' => '30 min',
+                'calories' => 320,
+                'date' => date('M d', strtotime('-2 days'))
+            ],
+            [
+                'name' => 'HIIT Workout',
+                'duration' => '45 min',
+                'calories' => 450,
+                'date' => date('M d', strtotime('-4 days'))
+            ],
+            [
+                'name' => 'Yoga Session',
+                'duration' => '60 min',
+                'calories' => 200,
+                'date' => date('M d', strtotime('-7 days'))
+            ]
+        ];
+    }
+
+ 
+    $response['success'] = true;
+    $response['data'] = $dashboardData;
+    $response['message'] = 'Dashboard data retrieved successfully';
+    $response['meta']['userId'] = $userId;
+    $response['meta']['generatedAt'] = date('c');
+
+    http_response_code(200);
+
+} catch (Throwable $e) {
+  
+    $statusCode = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
+
+    $response['message'] = $e->getMessage();
+    $response['error'] = [
+        'type' => get_class($e),
+        'code' => $statusCode
+    ];
+
+    error_log(sprintf(
+        '[%s] %s in %s:%d',
+        get_class($e),
+        $e->getMessage(),
+        $e->getFile(),
+        $e->getLine()
+    ));
+
+    http_response_code($statusCode);
+} finally {
+
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+
+  
+    echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
 }
